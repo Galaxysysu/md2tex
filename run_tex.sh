@@ -27,12 +27,14 @@ compile_tex() {
     local tex_dir=$(dirname "$tex_file")
     local tex_filename=$(basename "$tex_file")
     local tex_name="${tex_filename%.tex}"
+    local log_file="/tmp/xelatex_$$.log"
     
     # 切换到LaTeX文件所在目录
     cd "$tex_dir" || { echo -e "${RED}错误: 无法切换到目录 '$tex_dir'${NC}"; return 1; }
     
     echo -e "${BLUE}[$(date +%H:%M:%S)] 开始第一次编译...${NC}"
-    xelatex -interaction=nonstopmode "$tex_filename"
+    # 将编译输出重定向到临时日志文件
+    xelatex -interaction=nonstopmode "$tex_filename" > "$log_file" 2>&1
     local compile_status=$?
     
     if [ $compile_status -ne 0 ]; then
@@ -42,7 +44,8 @@ compile_tex() {
     fi
     
     echo -e "${BLUE}[$(date +%H:%M:%S)] 开始第二次编译...${NC}"
-    xelatex -interaction=nonstopmode "$tex_filename"
+    # 将编译输出重定向到临时日志文件
+    xelatex -interaction=nonstopmode "$tex_filename" > "$log_file" 2>&1
     compile_status=$?
     
     if [ $compile_status -ne 0 ]; then
@@ -55,6 +58,8 @@ compile_tex() {
     if [ -f "${tex_name}.pdf" ]; then
         local pdf_size=$(du -h "${tex_name}.pdf" | cut -f1)
         echo -e "${GREEN}成功生成PDF文件: ${YELLOW}${tex_dir}/${tex_name}.pdf ${GREEN}(大小: $pdf_size)${NC}"
+        # 清理临时日志文件
+        rm -f "$log_file"
         return 0
     else
         echo -e "${RED}错误: 无法找到生成的PDF文件${NC}"
@@ -62,6 +67,8 @@ compile_tex() {
             echo -e "${YELLOW}检查日志文件中的错误:${NC}"
             grep -n "!" "${tex_name}.log" | head -10
         fi
+        # 清理临时日志文件
+        rm -f "$log_file"
         return 1
     fi
 }
@@ -74,23 +81,51 @@ process_markdown() {
     local md_name="${md_filename%.md}"
     # 修改tex文件路径，考虑到md2latex_pandoc.py会创建同名文件夹
     local tex_file="${md_dir}/${md_name}/${md_name}.tex"
+    local log_file="/tmp/md2latex_$$.log"
+    local script_options="--fix-images --quiet"
+    
+    # 如果需要打开PDF，添加--open选项
+    if [ "$OPEN_PDF" = true ]; then
+        script_options="$script_options --open"
+    fi
     
     echo -e "${BLUE}转换Markdown到LaTeX: ${YELLOW}$md_file${NC}"
     
-    # 调用Python脚本转换Markdown到LaTeX
-    python md2latex_pandoc.py "$md_file"
-    if [ $? -ne 0 ]; then
+    # 调用Python脚本转换Markdown到LaTeX，重定向输出
+    python md2latex_pandoc.py "$md_file" $script_options > "$log_file" 2>&1
+    local convert_status=$?
+    if [ $convert_status -ne 0 ]; then
         echo -e "${RED}错误: Markdown转换失败${NC}"
+        # 显示错误日志
+        cat "$log_file"
+        rm -f "$log_file"
         return 1
     fi
     
     # 检查生成的tex文件
     if [ ! -f "$tex_file" ]; then
         echo -e "${RED}错误: 未找到生成的LaTeX文件: $tex_file${NC}"
+        cat "$log_file"
+        rm -f "$log_file"
         return 1
     fi
     
-    # 编译生成的tex文件
+    # 如果md2latex_pandoc.py已经处理了PDF生成和打开，我们可以直接返回
+    if [[ "$script_options" == *"--open"* ]]; then
+        pdf_file="${md_dir}/${md_name}/${md_name}.pdf"
+        if [ -f "$pdf_file" ]; then
+            local pdf_size=$(du -h "$pdf_file" | cut -f1)
+            echo -e "${GREEN}成功生成PDF文件: ${YELLOW}${pdf_file} ${GREEN}(大小: $pdf_size)${NC}"
+            # 清理临时日志文件
+            rm -f "$log_file"
+            return 0
+        fi
+    fi
+    
+    # 清理临时日志文件
+    rm -f "$log_file"
+    
+    # 如果脚本没有处理PDF生成，使用compile_tex函数
     compile_tex "$tex_file"
     return $?
 }

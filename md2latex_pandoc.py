@@ -149,17 +149,17 @@ def find_image_file(md_file_path, img_path):
         if 'pics' in dirs:
             possible_locations.append(Path(root) / 'pics' / img_file_name)
     
-    print(f"查找图片 '{img_file_name}' 的可能位置:")
+    debug_print(f"查找图片 '{img_file_name}' 的可能位置:")
     # 检查所有可能的位置
     for loc in possible_locations:
-        print(f"  检查: {loc}")
+        debug_print(f"  检查: {loc}")
         if loc.exists():
             img_file_path = loc
-            print(f"  找到图像文件: {img_file_path}")
+            debug_print(f"  找到图像文件: {img_file_path}")
             break
     
     if not img_file_path:
-        print(f"  未找到图像文件: {img_file_name}")
+        debug_print(f"  未找到图像文件: {img_file_name}")
     
     return img_file_path
 
@@ -197,18 +197,18 @@ def convert_md_to_latex(input_file, output_dir, template_path):
         content = f.read()
     
     # 打印调试信息 - 展示处理前的Markdown内容
-    print(f"\n调试: 原始Markdown内容中的图片引用:")
+    debug_print(f"\n调试: 原始Markdown内容中的图片引用:")
     # 提取Markdown中引用的图像文件 - 改进正则表达式匹配多种格式
     standard_img_pattern = r'!\[(.*?)\]\((.*?)\)'
     special_img_pattern = r'!\((图\s+\d+:.*?)\)\((.*?)\)'
     
-    print("标准图片格式引用:")
+    debug_print("标准图片格式引用:")
     for alt_text, img_path in re.findall(standard_img_pattern, content):
-        print(f"  标题: '{alt_text}', 路径: '{img_path}'")
+        debug_print(f"  标题: '{alt_text}', 路径: '{img_path}'")
     
-    print("特殊图片格式引用:")
+    debug_print("特殊图片格式引用:")
     for caption, img_path in re.findall(special_img_pattern, content):
-        print(f"  标题: '{caption}', 路径: '{img_path}'")
+        debug_print(f"  标题: '{caption}', 路径: '{img_path}'")
     
     # 处理所有可能的图片引用模式
     referenced_images = []
@@ -223,7 +223,7 @@ def convert_md_to_latex(input_file, output_dir, template_path):
             
             # 复制图片到输出目录
             if not target_path.exists():
-                print(f"复制图像文件: {img_file_path} 到 {target_path}")
+                debug_print(f"复制图像文件: {img_file_path} 到 {target_path}")
                 shutil.copy(img_file_path, target_path)
             
             # 更新Markdown中的图片引用 - 确保使用正确的相对路径
@@ -233,9 +233,9 @@ def convert_md_to_latex(input_file, output_dir, template_path):
             content = content.replace(old_ref, new_ref)
             
             referenced_images.append((alt_text, target_path, img_file_name))
-            print(f"处理标准图片引用: '{alt_text}' -> {new_path}")
+            debug_print(f"处理标准图片引用: '{alt_text}' -> {new_path}")
         else:
-            print(f"警告: 无法找到图像文件: {img_path}")
+            debug_print(f"警告: 无法找到图像文件: {img_path}")
     
     # 处理特殊图片引用： !(caption)(path)
     for caption, img_path in re.findall(special_img_pattern, content):
@@ -247,7 +247,7 @@ def convert_md_to_latex(input_file, output_dir, template_path):
             
             # 复制图片到输出目录
             if not target_path.exists():
-                print(f"复制图像文件: {img_file_path} 到 {target_path}")
+                debug_print(f"复制图像文件: {img_file_path} 到 {target_path}")
                 shutil.copy(img_file_path, target_path)
             
             # 更新Markdown中的图片引用 - 特殊格式
@@ -266,9 +266,9 @@ def convert_md_to_latex(input_file, output_dir, template_path):
             content = content.replace(old_ref, new_ref)
             
             referenced_images.append((caption, target_path, img_file_name))
-            print(f"处理特殊图片引用: '{caption}' -> LaTeX图片环境")
+            debug_print(f"处理特殊图片引用: '{caption}' -> LaTeX图片环境")
         else:
-            print(f"警告: 无法找到图像文件: {img_path}")
+            debug_print(f"警告: 无法找到图像文件: {img_path}")
     
     # 检查是否有参考文献文件
     input_dir = input_path.parent
@@ -365,247 +365,168 @@ header-includes:
 
 def compile_latex(tex_file, fix_images=False):
     """编译LaTeX文件生成PDF"""
-    tex_path = Path(tex_file)
-    output_dir = tex_path.parent
-    tex_filename = tex_path.name
-    
-    # 切换到输出目录，以便正确处理相对路径
-    current_dir = os.getcwd()
-    os.chdir(output_dir)
-    
     try:
-        print("正在编译LaTeX生成PDF...")
+        # 确保输入文件存在
+        tex_path = Path(tex_file)
+        if not tex_path.exists():
+            print(f"错误: LaTeX文件不存在: {tex_file}")
+            return False, None
         
-        # 获取目录中的文件列表
-        print("当前目录文件列表:")
-        files_before = set(os.listdir('.'))
-        for f in sorted(files_before):
-            if f.endswith('.pdf'):
-                print(f"  {f} - {os.path.getsize(f)} 字节")
-        
-        # 检查pics目录中的图片
-        pics_dir = Path('pics')
-        if pics_dir.exists():
-            print("检查图片文件:")
-            for img in pics_dir.glob('*'):
-                print(f"  {img.name} - {img.stat().st_size} 字节")
-                
-                # 对于PDF图片，检查是否有损坏
-                if img.name.endswith('.pdf') and img.stat().st_size == 0:
-                    print(f"  警告: 空文件 {img.name}, 尝试复制替代图片")
-                    # 尝试找到替代图片
-                    for root, dirs, files in os.walk(Path(current_dir)):
-                        for file in files:
-                            if file == img.name and Path(root) / file != img:
-                                source = Path(root) / file
-                                if source.stat().st_size > 0:
-                                    print(f"  正在复制替代图片: {source} -> {img}")
-                                    shutil.copy(source, img)
-                                    break
-        
-        # 如果启用了fix_images选项，尝试更强的图片修复
-        if fix_images:
-            print("使用强化图片修复模式...")
-            
-            # 1. 检查LaTeX文件中的图片引用是否存在
-            with open(tex_filename, 'r', encoding='utf-8') as f:
-                tex_content = f.read()
-            
-            # 提取所有图片引用
-            img_refs = re.findall(r'\\includegraphics(?:\[.*?\])?\{(.*?)\}', tex_content)
-            print(f"发现 {len(img_refs)} 个图片引用")
-            
-            for img_ref in img_refs:
-                img_path = Path(img_ref)
-                full_path = Path(img_ref) if img_ref.startswith('/') else Path('.') / img_ref
-                
-                # 检查图片文件是否存在
-                if not full_path.exists():
-                    print(f"  图片不存在: {img_ref}, 尝试修复...")
-                    
-                    # 尝试找到替代图片文件
-                    # 1. 检查gemini_paper目录
-                    img_name = img_path.name
-                    found = False
-                    
-                    # 搜索所有可能的位置
-                    search_paths = [
-                        '.',  # 当前目录
-                        current_dir,  # 工作目录
-                        Path(current_dir) / 'gemini_paper',  # gemini_paper目录
-                    ]
-                    
-                    for search_dir in search_paths:
-                        if not Path(search_dir).exists():
-                            continue
-                            
-                        for root, dirs, files in os.walk(search_dir):
-                            for file in files:
-                                if file == img_name:
-                                    source = Path(root) / file
-                                    # 确保源文件不是当前文件
-                                    if str(source) != str(full_path) and source.stat().st_size > 0:
-                                        print(f"  找到替代图片: {source}")
-                                        # 确保目标目录存在
-                                        full_path.parent.mkdir(parents=True, exist_ok=True)
-                                        shutil.copy(source, full_path)
-                                        print(f"  已复制图片到: {full_path}")
-                                        found = True
-                            if found:
-                                break
-                        if found:
-                            break
-                    
-                    # 如果还是找不到，尝试根据文件名模式搜索
-                    if not found and 'figure_' in img_name:
-                        # 提取图片编号
-                        fig_num_match = re.search(r'figure_(\d+)\.', img_name)
-                        if fig_num_match:
-                            fig_num = fig_num_match.group(1)
-                            
-                            # 尝试查找类似名称的文件
-                            for ext in ['.pdf', '.png', '.jpg', '.jpeg', '.svg']:
-                                pattern = f'*figure*{fig_num}*{ext}'
-                                print(f"  尝试搜索模式: {pattern}")
-                                
-                                for search_dir in search_paths:
-                                    if not Path(search_dir).exists():
-                                        continue
-                                        
-                                    for root, dirs, files in os.walk(search_dir):
-                                        matches = [f for f in files if f"figure_{fig_num}" in f and f.endswith(ext)]
-                                        if matches:
-                                            source = Path(root) / matches[0]
-                                            if source.stat().st_size > 0:
-                                                print(f"  找到类似图片: {source}")
-                                                # 如果找到的是SVG，需要转换为PDF
-                                                if ext == '.svg':
-                                                    # 使用inkscape转换SVG到PDF
-                                                    try:
-                                                        pdf_output = full_path.with_suffix('.pdf')
-                                                        print(f"  尝试将SVG转换为PDF: {source} -> {pdf_output}")
-                                                        convert_cmd = ['inkscape', 
-                                                                      str(source), 
-                                                                      '--export-filename', str(pdf_output),
-                                                                      '--export-area-drawing']
-                                                        
-                                                        result = subprocess.run(
-                                                            convert_cmd,
-                                                            stdout=subprocess.PIPE,
-                                                            stderr=subprocess.PIPE,
-                                                            check=False
-                                                        )
-                                                        
-                                                        if result.returncode == 0 and pdf_output.exists():
-                                                            print(f"  成功将SVG转换为PDF: {pdf_output}")
-                                                            # 更新LaTeX文件引用
-                                                            new_ref = str(pdf_output.relative_to('.'))
-                                                            tex_content = tex_content.replace(img_ref, new_ref)
-                                                            found = True
-                                                    except Exception as e:
-                                                        print(f"  SVG转换失败: {e}")
-                                                else:
-                                                    # 直接复制文件
-                                                    full_path.parent.mkdir(parents=True, exist_ok=True)
-                                                    shutil.copy(source, full_path)
-                                                    print(f"  已复制图片到: {full_path}")
-                                                    found = True
-                                            break
-                                    if found:
-                                        break
-                                if found:
-                                    break
-            
-            # 写回更新后的LaTeX内容
-            with open(tex_filename, 'w', encoding='utf-8') as f:
-                f.write(tex_content)
-        
-        # 第一次编译，生成中间文件
-        print("第一次编译...")
-        compile_cmd = ['xelatex', '-interaction=nonstopmode', tex_filename]
-        result = subprocess.run(compile_cmd, 
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    timeout=30, check=False)
-        
-        # 检查编译日志中是否有关于图片的错误或警告
-        log_file = Path(tex_filename.replace('.tex', '.log'))
-        if log_file.exists():
-            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                log_content = f.read()
-                img_errors = re.findall(r'! LaTeX Error: Cannot find image file.*?pics/.*?\.pdf', log_content)
-                for error in img_errors:
-                    missing_img = re.search(r'pics/[^.]+\.pdf', error)
-                    if missing_img:
-                        print(f"  错误: 图片文件缺失 {missing_img.group(0)}")
-                        # 尝试找到同名图片并复制
-                        img_name = Path(missing_img.group(0)).name
-                        for root, dirs, files in os.walk(Path(current_dir)):
-                            if img_name in files:
-                                source = Path(root) / img_name
-                                target = Path('pics') / img_name
-                                print(f"  找到替代图片: {source}")
-                                if not Path('pics').exists():
-                                    Path('pics').mkdir(parents=True)
-                                shutil.copy(source, target)
-                                print(f"  已复制图片到正确位置: {target}")
-                                break
-        
-        # 第二次编译，生成最终PDF
-        print("第二次编译...")
-        result = subprocess.run(compile_cmd, 
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    timeout=30, check=False)
-        
-        # 获取编译后目录文件列表
-        files_after = set(os.listdir('.'))
-        new_files = files_after - files_before
-        
-        # 查找生成的PDF文件
+        # LaTeX文件所在目录
+        tex_dir = tex_path.parent
+        tex_filename = tex_path.name
         pdf_filename = tex_path.stem + '.pdf'
-        pdf_exists = os.path.exists(pdf_filename)
+        pdf_file = tex_dir / pdf_filename
         
-        if pdf_exists:
-            pdf_size = os.path.getsize(pdf_filename)
-            print(f"找到PDF文件: {pdf_filename}, 大小: {pdf_size} 字节")
-            if pdf_size > 0:
-                full_pdf_path = os.path.join(str(output_dir), pdf_filename)
-                print(f"PDF文件已成功生成: {full_pdf_path}")
-                return True, full_pdf_path  # 返回成功状态和完整PDF路径
+        # 先移除可能存在的旧PDF，避免误判
+        if pdf_file.exists():
+            os.remove(pdf_file)
+        
+        # 获取初始目录文件列表
+        initial_files = os.listdir(tex_dir)
+        debug_print("正在编译LaTeX生成PDF...")
+        
+        # 进入LaTeX文件所在目录
+        current_dir = os.getcwd()
+        os.chdir(tex_dir)
+        
+        try:
+            # 第一次编译: xelatex
+            debug_print("第一次编译...")
+            xelatex_cmd = ['xelatex', '-interaction=nonstopmode', tex_filename]
+            xelatex_result = subprocess.run(
+                xelatex_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True  # 使用文本模式
+            )
+            
+            # 第二次编译: xelatex
+            debug_print("第二次编译...")
+            xelatex_result = subprocess.run(
+                xelatex_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            # 检查编译结果和PDF文件
+            pdf_success = os.path.exists(pdf_filename)
+            
+            # 检查PDF大小
+            pdf_size = 0
+            if pdf_success:
+                pdf_size = os.path.getsize(pdf_filename)
+                debug_print(f"找到PDF文件: {pdf_filename}, 大小: {pdf_size} 字节")
+            
+            # 检查是否真正成功（PDF存在且不为空）
+            if pdf_success and pdf_size > 0:
+                pdf_path = tex_dir / pdf_filename
+                debug_print(f"PDF文件已成功生成: {pdf_path}")
             else:
-                print("PDF文件大小为0，编译可能出现问题")
-        else:
-            print(f"无法找到PDF文件: {pdf_filename}")
-            if new_files:
-                print("编译产生的新文件:")
-                for f in sorted(new_files):
-                    print(f"  {f}")
-        
-        # 检查日志文件
-        log_filename = tex_path.stem + '.log'
-        if os.path.exists(log_filename):
-            print(f"检查日志文件: {log_filename}")
-            with open(log_filename, 'r', encoding='utf-8', errors='ignore') as f:
-                log_content = f.read()
+                # 可能有错误，检查LaTeX日志
+                if os.path.exists(f"{tex_path.stem}.log"):
+                    with open(f"{tex_path.stem}.log", 'r', encoding='utf-8', errors='ignore') as log_file:
+                        log_content = log_file.read()
+                        error_lines = [line for line in log_content.split('\n') if '! ' in line]
+                        if error_lines:
+                            print("编译时遇到错误:")
+                            for line in error_lines[:5]:  # 只显示前5个错误
+                                print(f"  {line}")
+                        else:
+                            print("编译过程可能有未知错误，请检查日志文件")
                 
-                # 检查是否有"output written on"消息
-                output_match = re.search(r'Output written on ([^\n]+)', log_content)
-                if output_match:
-                    print(f"日志中显示已生成输出: {output_match.group(1)}")
+                # 检查编译过程的标准输出
+                if xelatex_result.returncode != 0:
+                    print(f"xelatex返回错误码: {xelatex_result.returncode}")
+                    error_output = xelatex_result.stderr
+                    if error_output:
+                        print("错误输出:", error_output[:500])  # 限制输出长度
                 
-                # 查找错误信息
-                error_lines = [line for line in log_content.split('\n') if '!' in line]
-                if error_lines:
-                    print("日志中的错误信息:")
-                    print('\n'.join(error_lines))
+                return False, None
         
-        pdf_exists = os.path.exists(pdf_filename)
-        pdf_size = os.path.getsize(pdf_filename) if pdf_exists else 0
-        return pdf_exists and pdf_size > 0, str(output_dir / pdf_filename) if pdf_exists else None
+            # 列出目录中的当前文件
+            current_files = os.listdir(".")
+            debug_print("当前目录文件列表:")
+            for f in current_files:
+                if f.endswith(".pdf"):
+                    debug_print(f"  {f} - {os.path.getsize(f)} 字节")
+            
+            # 检查图片文件
+            pics_dir = Path("pics")
+            if pics_dir.exists():
+                debug_print("检查图片文件:")
+                for img_file in pics_dir.glob("*.*"):
+                    debug_print(f"  {img_file.name} - {img_file.stat().st_size} 字节")
+            
+            # 强化图片修复模式
+            if fix_images and pdf_success:
+                try:
+                    debug_print("使用强化图片修复模式...")
+                    
+                    # 读取LaTeX文件内容
+                    with open(tex_filename, 'r', encoding='utf-8') as f:
+                        tex_content = f.read()
+                    
+                    # 找出所有图片引用
+                    img_refs = re.findall(r'\\includegraphics(?:\[.*?\])?\{(.*?)\}', tex_content)
+                    debug_print(f"发现 {len(img_refs)} 个图片引用")
+                    
+                    # 创建一个新版本的LaTeX内容，确保图片引用正确
+                    new_tex_content = tex_content
+                    
+                    # 如果是进一步强化模式，可以在这里添加额外的处理
+                    # 例如，确保图片路径正确
+                    for img_ref in img_refs:
+                        # 检查图片是否存在
+                        img_path = Path(img_ref)
+                        if not (img_path.is_absolute() or img_path.exists()):
+                            # 如果是相对路径且不存在，尝试查找
+                            img_name = img_path.name
+                            # 搜索可能的位置
+                            for root, dirs, files in os.walk('.'):
+                                if img_name in files:
+                                    found_path = Path(root) / img_name
+                                    rel_path = str(found_path.relative_to(".")).replace("\\", "/")
+                                    debug_print(f"替换图片路径: {img_ref} -> {rel_path}")
+                                    new_tex_content = new_tex_content.replace(f"{{{img_ref}}}", f"{{{rel_path}}}")
+                                    break
+                    
+                    # 只有当内容发生变化时才重写文件和重新编译
+                    if new_tex_content != tex_content:
+                        debug_print("LaTeX内容已更新，重新编译...")
+                        with open(tex_filename, 'w', encoding='utf-8') as f:
+                            f.write(new_tex_content)
+                        
+                        # 重新编译两次
+                        debug_print("第一次编译...")
+                        subprocess.run(xelatex_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        debug_print("第二次编译...")
+                        subprocess.run(xelatex_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        
+                        # 再次检查PDF
+                        pdf_success = os.path.exists(pdf_filename)
+                        if pdf_success:
+                            pdf_size = os.path.getsize(pdf_filename)
+                            debug_print(f"找到PDF文件: {pdf_filename}, 大小: {pdf_size} 字节")
+                        
+                            if not (pdf_success and pdf_size > 0):
+                                print("强化修复后编译失败，请检查LaTeX错误")
+                                return False, None
+                
+                except Exception as e:
+                    print(f"强化图片修复模式出错: {e}")
+                    # 继续使用原始编译结果
+            
+            return True, tex_dir / pdf_filename
+        
+        finally:
+            # 确保返回原始目录
+            os.chdir(current_dir)
+    
     except Exception as e:
-        print(f"编译过程中出错: {e}")
+        print(f"编译LaTeX时出错: {e}")
         return False, None
-    finally:
-        os.chdir(current_dir)
 
 def remove_lstlisting_wrappers(content):
     """
@@ -617,13 +538,13 @@ def remove_lstlisting_wrappers(content):
     # 查找匹配项并替换
     matches = list(re.finditer(pattern, content, re.DOTALL))
     if matches:
-        print(f"找到了{len(matches)}处被lstlisting包装的图片引用")
+        debug_print(f"找到了{len(matches)}处被lstlisting包装的图片引用")
         for match in matches:
             # 提取图片引用代码
             figure_code = match.group(2).strip()
             # 替换整个匹配为仅保留的图片引用代码
             content = content.replace(match.group(0), figure_code)
-            print("已移除lstlisting包装，保留图片引用代码")
+            debug_print("已移除lstlisting包装，保留图片引用代码")
     
     # 查找并移除空的lstlisting环境
     empty_pattern = r'\\begin\{lstlisting\}(\[language=XML\])?\s*\\end\{lstlisting\}'
@@ -649,7 +570,7 @@ def remove_lstlisting_wrappers(content):
                 # 替换原文本（包括intro、lstlisting和figure）
                 original = content[match.start():match.end() + figure_match.end()]
                 content = content.replace(original, replacement)
-                print("已处理SVG介绍后的lstlisting并保留图片")
+                debug_print("已处理SVG介绍后的lstlisting并保留图片")
             else:
                 # 没有找到紧随其后的figure，尝试在pics目录查找合适的图片
                 figure_num = 1  # 默认图片编号
@@ -672,7 +593,7 @@ def remove_lstlisting_wrappers(content):
 \\end{{figure}}
 """
                 content = content.replace(match.group(0), replacement)
-                print(f"已替换空lstlisting为默认图片figure_{figure_num}.pdf")
+                debug_print(f"已替换空lstlisting为默认图片figure_{figure_num}.pdf")
         elif '\\begin{figure}' in listing_content and '\\end{figure}' in listing_content:
             # lstlisting中包含图片引用，直接提取
             figure_pattern = r'\\begin\{figure\}.*?\\end\{figure\}'
@@ -680,14 +601,14 @@ def remove_lstlisting_wrappers(content):
             if figure_match:
                 replacement = f"{intro_text}\n\n{figure_match.group(0)}"
                 content = content.replace(match.group(0), replacement)
-                print("已从lstlisting中提取并保留图片引用")
+                debug_print("已从lstlisting中提取并保留图片引用")
     
     return content
 
 def post_process_latex(tex_file, svg_files=None):
     """后处理LaTeX文件，修复一些特定问题，处理SVG引用"""
     try:
-        print(f"\n调试: 对LaTeX文件进行后处理: {tex_file}")
+        debug_print(f"\n调试: 对LaTeX文件进行后处理: {tex_file}")
         with open(tex_file, 'r', encoding='utf-8') as f:
             content = f.read()
         
@@ -696,7 +617,7 @@ def post_process_latex(tex_file, svg_files=None):
             content = content.replace('\\begin{document}', 
                                     '\\setCJKmainfont{STSong}\n'
                                     '\\begin{document}')
-            print("已添加CJK字体设置")
+            debug_print("已添加CJK字体设置")
             
         # 新增：移除lstlisting环境包装，保留图片引用代码
         content = remove_lstlisting_wrappers(content)
@@ -725,7 +646,7 @@ def post_process_latex(tex_file, svg_files=None):
 \\newcommand{\\doublearrow}{$\\leftrightarrow$}
 \\newcommand{\\doublelarrow}{$\\Leftrightarrow$}
 """)
-            print("已添加特殊字符支持（简化版本）")
+            debug_print("已添加特殊字符支持（简化版本）")
         
         # 添加所有前言需要的包和命令
         if preamble_additions:
@@ -735,7 +656,7 @@ def post_process_latex(tex_file, svg_files=None):
                 content = content.replace("\\usepackage{amsmath}", "\\usepackage{amsmath}\n" + preamble_text)
             else:
                 content = content.replace('\\begin{document}', preamble_text + '\\begin{document}')
-            print(f"已添加必要的LaTeX包和命令定义")
+            debug_print(f"已添加必要的LaTeX包和命令定义")
         
         # 3. 替换文本中的特殊字符为TeX命令
         # 希腊字母替换 - 使用更简单的方式
@@ -763,7 +684,7 @@ def post_process_latex(tex_file, svg_files=None):
                     new_content += parts[i]
                 content = new_content
         
-        print("已处理特殊字符")
+        debug_print("已处理特殊字符")
         
         # 4. 处理SVG图像引用
         if svg_files:
@@ -784,7 +705,7 @@ def post_process_latex(tex_file, svg_files=None):
                     caption_pattern = f"\\caption{{{pattern}}}"
                     if caption_pattern in content:
                         content = content.replace(caption_pattern, f"\\caption{{{fig_caption}}}")
-                        print(f"替换了图像标题: '{pattern}' -> '{fig_caption}'")
+                        debug_print(f"替换了图像标题: '{pattern}' -> '{fig_caption}'")
                         break
                 
                 # 查找缺失的图像引用并修复
@@ -800,7 +721,7 @@ def post_process_latex(tex_file, svg_files=None):
                             f"\\includegraphics{{{image_name}}}", 
                             f"\\includegraphics[width=0.8\\textwidth]{{{svg_path}}}"
                         )
-                        print(f"修复了图像路径: '{image_name}' -> '{svg_path}'")
+                        debug_print(f"修复了图像路径: '{image_name}' -> '{svg_path}'")
                     elif "SVG_PLACEHOLDER" in content:
                         # 查找包含占位符的段落，并添加正确的图像引用
                         for placeholder in placeholder_patterns:
@@ -824,7 +745,7 @@ def post_process_latex(tex_file, svg_files=None):
                                         paragraph_with_placeholder.group(0),
                                         figure_code
                                     )
-                                    print(f"添加了图像引用: 图 {svg_info['index']}")
+                                    debug_print(f"添加了图像引用: 图 {svg_info['index']}")
                                     break
         
         # 5. 强化图片处理 - 确保在LaTeX中正确加载图片
@@ -849,7 +770,7 @@ def post_process_latex(tex_file, svg_files=None):
             new_tag = f'\\includegraphics{options}{{{path}}}'
             if old_tag != new_tag:
                 content = content.replace(old_tag, new_tag)
-                print(f"修复图片路径格式: {old_tag} -> {new_tag}")
+                debug_print(f"修复图片路径格式: {old_tag} -> {new_tag}")
         
         # 6. 修复图像路径问题（特别是未指定pics/目录的图片）
         img_pattern = r'\\includegraphics(\[.*?\])?{((?!pics/).+?\.(?:pdf|png|jpg|jpeg))}'
@@ -862,7 +783,7 @@ def post_process_latex(tex_file, svg_files=None):
                     f"\\includegraphics{options}{{{img_path}}}", 
                     f"\\includegraphics[width=0.8\\textwidth]{{{fixed_path}}}"
                 )
-                print(f"修复了图像路径: '{img_path}' -> '{fixed_path}'")
+                debug_print(f"修复了图像路径: '{img_path}' -> '{fixed_path}'")
                 
                 # 检查图片文件是否存在，不存在则尝试查找并复制
                 output_dir = Path(tex_file).parent
@@ -876,13 +797,13 @@ def post_process_latex(tex_file, svg_files=None):
                         if img_name in files:
                             source_path = Path(root) / img_name
                             os.makedirs(target_path.parent, exist_ok=True)
-                            print(f"找到并复制图片: {source_path} -> {target_path}")
+                            debug_print(f"找到并复制图片: {source_path} -> {target_path}")
                             shutil.copy(source_path, target_path)
                             found = True
                             break
                     
                     if not found:
-                        print(f"警告: 无法找到图片文件 {img_name} 以复制到 {target_path}")
+                        debug_print(f"警告: 无法找到图片文件 {img_name} 以复制到 {target_path}")
         
         # 7. 确保所有图片引用都被包装在figure环境中
         img_refs = re.findall(r'\\includegraphics(?:\[.*?\])?\{(pics/[^}]+)\}', content)
@@ -919,7 +840,7 @@ def post_process_latex(tex_file, svg_files=None):
 """
                     # 替换原始图片标签
                     content = content.replace(img_tag, figure_env)
-                    print(f"为图片添加figure环境: {img_ref}")
+                    debug_print(f"为图片添加figure环境: {img_ref}")
         
         # 8. 处理特殊的图片引用格式
         # 8.1 处理 !(图 6: 普适性标度律示意图)(pics/figure_6.pdf) 格式
@@ -942,7 +863,7 @@ def post_process_latex(tex_file, svg_files=None):
 """
             # 替换原始的引用
             content = content.replace(match.group(0), figure_code)
-            print(f"修复了特殊图片引用: {caption}")
+            debug_print(f"修复了特殊图片引用: {caption}")
         
         # 8.2 修复已有的未正确处理的图片引用
         # 查找类似 ! [ 图 6: 普适性标度律示意图 ] ( pics/figure_6.pdf ) 的模式
@@ -969,7 +890,7 @@ def post_process_latex(tex_file, svg_files=None):
 """
                     # 替换原始引用
                     content = content.replace(match.group(0), figure_code)
-                    print(f"修复了标准图片引用: {caption}")
+                    debug_print(f"修复了标准图片引用: {caption}")
         
         # 9. 处理可能在文本中直接出现的LaTeX图片代码 (防止被当作文本显示)
         # 9.1 处理转义的LaTeX代码
@@ -979,7 +900,7 @@ def post_process_latex(tex_file, svg_files=None):
             # 将双反斜杠替换为单反斜杠
             fixed_code = escaped_code.replace('\\\\', '\\')
             content = content.replace(escaped_code, fixed_code)
-            print(f"修复了转义的LaTeX代码")
+            debug_print(f"修复了转义的LaTeX代码")
         
         # 9.2 处理图形环境中的空行，确保LaTeX正确处理
         figure_blocks = re.findall(r'\\begin{figure}.*?\\end{figure}', content, re.DOTALL)
@@ -988,7 +909,7 @@ def post_process_latex(tex_file, svg_files=None):
             fixed_block = re.sub(r'\n\s*\n', '\n', block)
             if block != fixed_block:
                 content = content.replace(block, fixed_block)
-                print("修复了figure环境中的空行")
+                debug_print("修复了figure环境中的空行")
         
         # 10. 在preamble中添加额外的图片支持
         if '\\begin{document}' in content:
@@ -1006,46 +927,46 @@ def post_process_latex(tex_file, svg_files=None):
             if '\\graphicspath' not in content:
                 # 在文档开始前添加这些设置
                 content = content.replace('\\begin{document}', preamble_additions + '\\begin{document}')
-                print("添加了图片处理增强设置")
+                debug_print("添加了图片处理增强设置")
         
         # 11. 确保图片文件存在
         tex_dir = Path(tex_file).parent
         pics_dir = tex_dir / 'pics'
         if not pics_dir.exists():
             pics_dir.mkdir(parents=True)
-            print(f"创建图片目录: {pics_dir}")
+            debug_print(f"创建图片目录: {pics_dir}")
         
         for img_ref in img_refs:
             img_path = tex_dir / img_ref
             if not img_path.exists():
-                print(f"警告: 图片文件不存在 {img_path}")
+                debug_print(f"警告: 图片文件不存在 {img_path}")
                 # 搜索整个项目查找同名图片
                 img_name = img_path.name
                 for root, dirs, files in os.walk('.'):
                     for file in files:
                         if file == img_name:
                             source = Path(root) / file
-                            print(f"找到替代图片: {source}")
+                            debug_print(f"找到替代图片: {source}")
                             # 确保目标目录存在
                             img_path.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copy(source, img_path)
-                            print(f"已复制图片: {source} -> {img_path}")
+                            debug_print(f"已复制图片: {source} -> {img_path}")
                             break
                     if img_path.exists():
                         break
         
         # 添加调试输出 - 列出所有图片引用和状态
-        print(f"\n调试: LaTeX内容中的图片引用:")
+        debug_print(f"\n调试: LaTeX内容中的图片引用:")
         for img_ref in img_refs:
             img_path = tex_dir / img_ref
-            print(f"  图片引用: {img_ref}")
-            print(f"  文件存在: {img_path.exists()}, 大小: {img_path.stat().st_size if img_path.exists() else 0} 字节")
+            debug_print(f"  图片引用: {img_ref}")
+            debug_print(f"  文件存在: {img_path.exists()}, 大小: {img_path.stat().st_size if img_path.exists() else 0} 字节")
         
         # 写回文件
         with open(tex_file, 'w', encoding='utf-8') as f:
             f.write(content)
         
-        print("已完成LaTeX文件后处理")
+        debug_print("已完成LaTeX文件后处理")
         return True
     except Exception as e:
         print(f"后处理LaTeX文件时出错: {str(e)}")
@@ -1054,6 +975,7 @@ def post_process_latex(tex_file, svg_files=None):
         return False
 
 def main():
+    """处理主程序逻辑"""
     parser = argparse.ArgumentParser(
         description='将Markdown文件转换为LaTeX并编译成PDF - 支持中文、数学公式和图片',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1078,14 +1000,22 @@ def main():
                         default=str(Path('latex_style/template.tex')))
     parser.add_argument('--open', action='store_true', help='编译完成后自动打开PDF文件')
     parser.add_argument('--fix-images', action='store_true', help='使用更强的图片修复模式，尝试解决图片不显示问题')
+    parser.add_argument('--quiet', action='store_true', help='减少输出信息，仅显示必要信息')
     
     args = parser.parse_args()
     
-    print(f"处理Markdown文件: {args.markdown_file}")
-    if args.output_dir:
-        print(f"输出目录: {args.output_dir}")
-    if args.open:
-        print("编译完成后将自动打开PDF文件")
+    # 设置全局输出模式
+    global VERBOSE
+    VERBOSE = not args.quiet
+    
+    if VERBOSE:
+        print(f"处理Markdown文件: {args.markdown_file}")
+        if args.output_dir:
+            print(f"输出目录: {args.output_dir}")
+        if args.open:
+            print("编译完成后将自动打开PDF文件")
+    else:
+        print(f"处理文件: {args.markdown_file}")
     
     # 转换Markdown为LaTeX
     tex_file = convert_md_to_latex(args.markdown_file, args.output_dir, args.template)
@@ -1117,6 +1047,107 @@ def main():
         except Exception as e:
             print(f"尝试打开PDF时出错: {e}")
             print("请手动打开PDF文件: " + pdf_path)
+
+# 添加全局变量控制详细输出
+VERBOSE = True
+
+def debug_print(*args, **kwargs):
+    """只在非静默模式下打印调试信息"""
+    if VERBOSE:
+        print(*args, **kwargs)
+
+def extract_titles_and_images(md_file):
+    """从Markdown中提取标题和图像，为后续处理做准备"""
+    try:
+        with open(md_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 提取标题
+        title_match = re.search(r'^# (.+)$', content, re.MULTILINE)
+        if title_match:
+            global DOCUMENT_TITLE
+            DOCUMENT_TITLE = title_match.group(1).strip()
+            debug_print(f"提取到文档标题: {DOCUMENT_TITLE}")
+        
+        # 调试输出Markdown中的图片引用
+        debug_print("\n调试: 原始Markdown内容中的图片引用:")
+        
+        # 查找标准图片格式 ![alt](path)
+        standard_img_refs = re.findall(r'!\[(.*?)\]\((.*?)\)', content)
+        debug_print("标准图片格式引用:")
+        for alt, path in standard_img_refs:
+            debug_print(f"  {alt}: {path}")
+        
+        # 查找特殊格式 !(alt)(path)
+        special_img_refs = re.findall(r'!\((.*?)\)\((.*?)\)', content)
+        debug_print("特殊图片格式引用:")
+        for alt, path in special_img_refs:
+            debug_print(f"  {alt}: {path}")
+        
+        # 处理SVG图像：查找SVG代码块并转换为PDF
+        svg_pattern = r'```xml\s*<svg.*?</svg>\s*```'
+        svg_blocks = re.findall(svg_pattern, content, re.DOTALL)
+        
+        global SVG_FILES
+        SVG_FILES = []
+        
+        for i, svg_block in enumerate(svg_blocks):
+            # 从SVG代码中提取<title>标签内容作为图片标题
+            title_match = re.search(r'<title>(.*?)</title>', svg_block)
+            title = f"SVG图{i+1}" if not title_match else title_match.group(1)
+            debug_print(f"从<title>标签提取到标题: {title}")
+            
+            # 清理SVG代码，去除```xml和```
+            svg_code = re.sub(r'```xml\s*|\s*```$', '', svg_block)
+            
+            # 生成文件名
+            output_dir = os.path.dirname(md_file)
+            if not os.path.exists(f"{output_dir}/pics"):
+                os.makedirs(f"{output_dir}/pics", exist_ok=True)
+            
+            svg_file = f"{output_dir}/pics/figure_{i+1}.svg"
+            pdf_file = f"{output_dir}/pics/figure_{i+1}.pdf"
+            
+            # 保存SVG文件
+            with open(svg_file, 'w', encoding='utf-8') as f:
+                f.write(svg_code)
+            
+            # 转换SVG到PDF
+            debug_print(f"尝试将SVG转换为PDF: figure_{i+1}.svg")
+            
+            try:
+                # 使用不同的工具尝试转换
+                # 首先尝试使用cairosvg（通常需要安装）
+                try:
+                    import cairosvg
+                    cairosvg.svg2pdf(file_obj=open(svg_file, 'rb'), write_to=pdf_file)
+                    debug_print(f"成功将SVG转换为PDF: figure_{i+1}.pdf")
+                except (ImportError, Exception) as e:
+                    # 如果cairosvg不可用，尝试使用Inkscape
+                    if shutil.which('inkscape'):
+                        os.system(f'inkscape -z -D --file="{svg_file}" --export-pdf="{pdf_file}"')
+                        debug_print(f"成功将SVG转换为PDF: figure_{i+1}.pdf")
+                    # 如果Inkscape不可用，尝试使用rsvg-convert
+                    elif shutil.which('rsvg-convert'):
+                        os.system(f'rsvg-convert -f pdf -o "{pdf_file}" "{svg_file}"')
+                        debug_print(f"成功将SVG转换为PDF: figure_{i+1}.pdf")
+                    else:
+                        debug_print(f"警告: 无法转换SVG到PDF，请安装cairosvg、Inkscape或rsvg-convert")
+                
+                # 记录PDF文件信息
+                if os.path.exists(pdf_file):
+                    SVG_FILES.append({
+                        'index': i+1,
+                        'path': f"pics/figure_{i+1}.pdf",
+                        'caption': title
+                    })
+            except Exception as e:
+                debug_print(f"警告: SVG转换时出错: {str(e)}")
+        
+        return True
+    except Exception as e:
+        print(f"提取标题和图像时出错: {str(e)}")
+        return False
 
 if __name__ == '__main__':
     main() 

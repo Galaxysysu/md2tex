@@ -1,0 +1,106 @@
+\documentclass[a4paper,UTF8]{ctexart}
+
+\usepackage{arxiv}  % 使用arxiv样式
+
+\usepackage[T1]{fontenc}    % 使用8-bit T1字体
+\usepackage{hyperref}       % 超链接
+\usepackage{url}            % URL排版
+\usepackage{booktabs}       % 专业表格
+\usepackage{amsfonts}       % 黑板粗体符号
+\usepackage{nicefrac}       % 提供简洁的分数表示
+\usepackage{microtype}      % 改善排版
+\usepackage{lipsum}         % 用于生成填充文本
+\usepackage{graphicx}       % 支持图片
+\usepackage{natbib}         % 参考文献
+\usepackage{doi}            % 支持DOI链接
+\usepackage{amsmath}        % 数学公式
+\usepackage{amssymb}        % 数学符号
+\usepackage{listings}       % 代码块
+\usepackage{xcolor}         % 颜色支持
+\usepackage{longtable}      % 长表格
+\usepackage{booktabs}       % 三线表
+\usepackage{multirow}       % 表格多行合并
+\usepackage{float}          % 控制浮动体
+\usepackage{caption}        % 图表标题
+
+% 设置页边距
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+% 数学公式设置
+\setlength{\jot}{10pt}
+\allowdisplaybreaks
+
+% 代码块设置
+\definecolor{codebackground}{rgb}{0.95,0.95,0.95}
+\definecolor{codecomment}{rgb}{0.4,0.4,0.4}
+\definecolor{codestring}{rgb}{0.58,0,0.82}
+\definecolor{codenumber}{rgb}{0.5,0.5,0.5}
+\definecolor{codeoperator}{rgb}{0.1,0.4,0.7}
+\definecolor{codekeyword}{rgb}{0,0,0.7}
+
+\lstset{
+    backgroundcolor=\color{codebackground},
+    commentstyle=\color{codecomment},
+    stringstyle=\color{codestring},
+    numberstyle=\color{codenumber},
+    keywordstyle=\color{codekeyword},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single,
+    captionpos=b
+}
+
+% 配置超链接
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+}
+
+% 文档信息
+\title{$title$}
+$if(subtitle)$
+\subtitle{$subtitle$}
+$endif$
+
+$if(author)$
+\author{$for(author)$$author$$sep$ \and $endfor$}
+$endif$
+
+$if(date)$
+\date{$date$}
+$else$
+\date{\today}
+$endif$
+
+\begin{document}
+\maketitle
+
+$if(abstract)$
+\begin{abstract}
+$abstract$
+\end{abstract}
+$endif$
+
+$if(keywords)$
+\keywords{$for(keywords)$$keywords$$sep$ \and $endfor$}
+$endif$
+
+$body$
+
+$if(bibliography)$
+\bibliographystyle{$if(biblio-style)$$biblio-style$$else$unsrtnat$endif$}
+\bibliography{$for(bibliography)$$bibliography$$sep$,$endfor$}
+$endif$
+
+\end{document} 

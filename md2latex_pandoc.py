@@ -118,10 +118,50 @@ def extract_and_save_svg(content, output_dir):
         })
         
         # 在Markdown内容中替换SVG代码为占位符，方便后续处理
-        placeholder_text = f"![图 {i+1}: SVG_PLACEHOLDER_{i}](pics/{file_to_use})"
+        placeholder_text = f"![图 {i+1}: {caption if caption else 'SVG_PLACEHOLDER_'+str(i)}](pics/{file_to_use})"
         content = content.replace(match.group(0), placeholder_text)
     
     return content, svg_files
+
+def find_image_file(md_file_path, img_path):
+    """查找图片文件的实际位置"""
+    img_file_path = None
+    img_file_name = Path(img_path).name
+    
+    # 递归搜索可能的图片位置
+    possible_locations = [
+        md_file_path.parent / img_path,                  # 相对于Markdown文件
+        Path(img_path),                                  # 当前工作目录
+        md_file_path.parent / 'pics' / img_file_name,    # pics子目录
+        Path('pics') / img_file_name,                    # 当前工作目录下的pics
+    ]
+    
+    # 添加gemini_paper路径
+    if Path('gemini_paper').exists():
+        for root, dirs, files in os.walk('gemini_paper'):
+            possible_locations.append(Path(root) / img_file_name)
+            # 检查pics子目录
+            if 'pics' in dirs:
+                possible_locations.append(Path(root) / 'pics' / img_file_name)
+    
+    # 添加所有可能的pics目录
+    for root, dirs, files in os.walk('.'):
+        if 'pics' in dirs:
+            possible_locations.append(Path(root) / 'pics' / img_file_name)
+    
+    print(f"查找图片 '{img_file_name}' 的可能位置:")
+    # 检查所有可能的位置
+    for loc in possible_locations:
+        print(f"  检查: {loc}")
+        if loc.exists():
+            img_file_path = loc
+            print(f"  找到图像文件: {img_file_path}")
+            break
+    
+    if not img_file_path:
+        print(f"  未找到图像文件: {img_file_name}")
+    
+    return img_file_path
 
 def convert_md_to_latex(input_file, output_dir, template_path):
     """使用pandoc将Markdown转换为LaTeX"""
@@ -137,6 +177,11 @@ def convert_md_to_latex(input_file, output_dir, template_path):
     if not output_dir_path.exists():
         output_dir_path.mkdir(parents=True)
     
+    # 确保pics目录存在
+    pics_dir = output_dir_path / 'pics'
+    if not pics_dir.exists():
+        pics_dir.mkdir(parents=True)
+    
     # 输出LaTeX文件路径
     tex_file = output_dir_path / f"{input_path.stem}.tex"
     
@@ -146,28 +191,84 @@ def convert_md_to_latex(input_file, output_dir, template_path):
     for file in template_dir.glob("*.sty"):
         shutil.copy(file, output_dir_path)
     
-    # 从Markdown内容中提取图像引用，只复制被引用的图像文件
+    # 从Markdown内容中提取图像引用，复制图像文件
     # 读取Markdown内容
     with open(input_path, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    # 提取Markdown中引用的图像文件
-    img_pattern = r'!\[.*?\]\((.*?)\)'
-    img_matches = re.findall(img_pattern, content)
-    referenced_images = set()
-    for img_path in img_matches:
-        # 处理相对路径
-        if not os.path.isabs(img_path):
-            full_path = input_path.parent / img_path
-            if full_path.exists():
-                referenced_images.add(full_path)
+    # 打印调试信息 - 展示处理前的Markdown内容
+    print(f"\n调试: 原始Markdown内容中的图片引用:")
+    # 提取Markdown中引用的图像文件 - 改进正则表达式匹配多种格式
+    standard_img_pattern = r'!\[(.*?)\]\((.*?)\)'
+    special_img_pattern = r'!\((图\s+\d+:.*?)\)\((.*?)\)'
     
-    # 仅复制文档中引用的图像
-    for img_path in referenced_images:
-        target_path = output_dir_path / img_path.name
-        if img_path.exists() and not target_path.exists():
-            print(f"复制引用的图像文件: {img_path.name}")
-            shutil.copy(img_path, output_dir_path)
+    print("标准图片格式引用:")
+    for alt_text, img_path in re.findall(standard_img_pattern, content):
+        print(f"  标题: '{alt_text}', 路径: '{img_path}'")
+    
+    print("特殊图片格式引用:")
+    for caption, img_path in re.findall(special_img_pattern, content):
+        print(f"  标题: '{caption}', 路径: '{img_path}'")
+    
+    # 处理所有可能的图片引用模式
+    referenced_images = []
+    
+    # 处理标准图片引用： ![alt](path)
+    for alt_text, img_path in re.findall(standard_img_pattern, content):
+        img_file_path = find_image_file(input_path, img_path)
+        
+        if img_file_path:
+            img_file_name = Path(img_file_path).name
+            target_path = pics_dir / img_file_name
+            
+            # 复制图片到输出目录
+            if not target_path.exists():
+                print(f"复制图像文件: {img_file_path} 到 {target_path}")
+                shutil.copy(img_file_path, target_path)
+            
+            # 更新Markdown中的图片引用 - 确保使用正确的相对路径
+            new_path = f"pics/{img_file_name}"
+            old_ref = f"![{alt_text}]({img_path})"
+            new_ref = f"![{alt_text}]({new_path})"
+            content = content.replace(old_ref, new_ref)
+            
+            referenced_images.append((alt_text, target_path, img_file_name))
+            print(f"处理标准图片引用: '{alt_text}' -> {new_path}")
+        else:
+            print(f"警告: 无法找到图像文件: {img_path}")
+    
+    # 处理特殊图片引用： !(caption)(path)
+    for caption, img_path in re.findall(special_img_pattern, content):
+        img_file_path = find_image_file(input_path, img_path)
+        
+        if img_file_path:
+            img_file_name = Path(img_file_path).name
+            target_path = pics_dir / img_file_name
+            
+            # 复制图片到输出目录
+            if not target_path.exists():
+                print(f"复制图像文件: {img_file_path} 到 {target_path}")
+                shutil.copy(img_file_path, target_path)
+            
+            # 更新Markdown中的图片引用 - 特殊格式
+            new_path = f"pics/{img_file_name}"
+            old_ref = f"!({caption})({img_path})"
+            # 直接创建LaTeX图片环境
+            fig_num = re.search(r'图\s+(\d+)', caption).group(1) if re.search(r'图\s+(\d+)', caption) else "1"
+            new_ref = f"""
+\\begin{{figure}}[htbp]
+\\centering
+\\includegraphics[width=0.8\\textwidth]{{{new_path}}}
+\\caption{{{caption}}}
+\\label{{fig:figure_{fig_num}}}
+\\end{{figure}}
+"""
+            content = content.replace(old_ref, new_ref)
+            
+            referenced_images.append((caption, target_path, img_file_name))
+            print(f"处理特殊图片引用: '{caption}' -> LaTeX图片环境")
+        else:
+            print(f"警告: 无法找到图像文件: {img_path}")
     
     # 检查是否有参考文献文件
     input_dir = input_path.parent
@@ -262,7 +363,7 @@ header-includes:
     print(f"已生成LaTeX文件: {tex_file}")
     return str(tex_file)
 
-def compile_latex(tex_file):
+def compile_latex(tex_file, fix_images=False):
     """编译LaTeX文件生成PDF"""
     tex_path = Path(tex_file)
     output_dir = tex_path.parent
@@ -282,15 +383,176 @@ def compile_latex(tex_file):
             if f.endswith('.pdf'):
                 print(f"  {f} - {os.path.getsize(f)} 字节")
         
+        # 检查pics目录中的图片
+        pics_dir = Path('pics')
+        if pics_dir.exists():
+            print("检查图片文件:")
+            for img in pics_dir.glob('*'):
+                print(f"  {img.name} - {img.stat().st_size} 字节")
+                
+                # 对于PDF图片，检查是否有损坏
+                if img.name.endswith('.pdf') and img.stat().st_size == 0:
+                    print(f"  警告: 空文件 {img.name}, 尝试复制替代图片")
+                    # 尝试找到替代图片
+                    for root, dirs, files in os.walk(Path(current_dir)):
+                        for file in files:
+                            if file == img.name and Path(root) / file != img:
+                                source = Path(root) / file
+                                if source.stat().st_size > 0:
+                                    print(f"  正在复制替代图片: {source} -> {img}")
+                                    shutil.copy(source, img)
+                                    break
+        
+        # 如果启用了fix_images选项，尝试更强的图片修复
+        if fix_images:
+            print("使用强化图片修复模式...")
+            
+            # 1. 检查LaTeX文件中的图片引用是否存在
+            with open(tex_filename, 'r', encoding='utf-8') as f:
+                tex_content = f.read()
+            
+            # 提取所有图片引用
+            img_refs = re.findall(r'\\includegraphics(?:\[.*?\])?\{(.*?)\}', tex_content)
+            print(f"发现 {len(img_refs)} 个图片引用")
+            
+            for img_ref in img_refs:
+                img_path = Path(img_ref)
+                full_path = Path(img_ref) if img_ref.startswith('/') else Path('.') / img_ref
+                
+                # 检查图片文件是否存在
+                if not full_path.exists():
+                    print(f"  图片不存在: {img_ref}, 尝试修复...")
+                    
+                    # 尝试找到替代图片文件
+                    # 1. 检查gemini_paper目录
+                    img_name = img_path.name
+                    found = False
+                    
+                    # 搜索所有可能的位置
+                    search_paths = [
+                        '.',  # 当前目录
+                        current_dir,  # 工作目录
+                        Path(current_dir) / 'gemini_paper',  # gemini_paper目录
+                    ]
+                    
+                    for search_dir in search_paths:
+                        if not Path(search_dir).exists():
+                            continue
+                            
+                        for root, dirs, files in os.walk(search_dir):
+                            for file in files:
+                                if file == img_name:
+                                    source = Path(root) / file
+                                    # 确保源文件不是当前文件
+                                    if str(source) != str(full_path) and source.stat().st_size > 0:
+                                        print(f"  找到替代图片: {source}")
+                                        # 确保目标目录存在
+                                        full_path.parent.mkdir(parents=True, exist_ok=True)
+                                        shutil.copy(source, full_path)
+                                        print(f"  已复制图片到: {full_path}")
+                                        found = True
+                            if found:
+                                break
+                        if found:
+                            break
+                    
+                    # 如果还是找不到，尝试根据文件名模式搜索
+                    if not found and 'figure_' in img_name:
+                        # 提取图片编号
+                        fig_num_match = re.search(r'figure_(\d+)\.', img_name)
+                        if fig_num_match:
+                            fig_num = fig_num_match.group(1)
+                            
+                            # 尝试查找类似名称的文件
+                            for ext in ['.pdf', '.png', '.jpg', '.jpeg', '.svg']:
+                                pattern = f'*figure*{fig_num}*{ext}'
+                                print(f"  尝试搜索模式: {pattern}")
+                                
+                                for search_dir in search_paths:
+                                    if not Path(search_dir).exists():
+                                        continue
+                                        
+                                    for root, dirs, files in os.walk(search_dir):
+                                        matches = [f for f in files if f"figure_{fig_num}" in f and f.endswith(ext)]
+                                        if matches:
+                                            source = Path(root) / matches[0]
+                                            if source.stat().st_size > 0:
+                                                print(f"  找到类似图片: {source}")
+                                                # 如果找到的是SVG，需要转换为PDF
+                                                if ext == '.svg':
+                                                    # 使用inkscape转换SVG到PDF
+                                                    try:
+                                                        pdf_output = full_path.with_suffix('.pdf')
+                                                        print(f"  尝试将SVG转换为PDF: {source} -> {pdf_output}")
+                                                        convert_cmd = ['inkscape', 
+                                                                      str(source), 
+                                                                      '--export-filename', str(pdf_output),
+                                                                      '--export-area-drawing']
+                                                        
+                                                        result = subprocess.run(
+                                                            convert_cmd,
+                                                            stdout=subprocess.PIPE,
+                                                            stderr=subprocess.PIPE,
+                                                            check=False
+                                                        )
+                                                        
+                                                        if result.returncode == 0 and pdf_output.exists():
+                                                            print(f"  成功将SVG转换为PDF: {pdf_output}")
+                                                            # 更新LaTeX文件引用
+                                                            new_ref = str(pdf_output.relative_to('.'))
+                                                            tex_content = tex_content.replace(img_ref, new_ref)
+                                                            found = True
+                                                    except Exception as e:
+                                                        print(f"  SVG转换失败: {e}")
+                                                else:
+                                                    # 直接复制文件
+                                                    full_path.parent.mkdir(parents=True, exist_ok=True)
+                                                    shutil.copy(source, full_path)
+                                                    print(f"  已复制图片到: {full_path}")
+                                                    found = True
+                                            break
+                                    if found:
+                                        break
+                                if found:
+                                    break
+            
+            # 写回更新后的LaTeX内容
+            with open(tex_filename, 'w', encoding='utf-8') as f:
+                f.write(tex_content)
+        
         # 第一次编译，生成中间文件
         print("第一次编译...")
-        subprocess.run(['xelatex', '-interaction=nonstopmode', tex_filename], 
+        compile_cmd = ['xelatex', '-interaction=nonstopmode', tex_filename]
+        result = subprocess.run(compile_cmd, 
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     timeout=30, check=False)
         
+        # 检查编译日志中是否有关于图片的错误或警告
+        log_file = Path(tex_filename.replace('.tex', '.log'))
+        if log_file.exists():
+            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                log_content = f.read()
+                img_errors = re.findall(r'! LaTeX Error: Cannot find image file.*?pics/.*?\.pdf', log_content)
+                for error in img_errors:
+                    missing_img = re.search(r'pics/[^.]+\.pdf', error)
+                    if missing_img:
+                        print(f"  错误: 图片文件缺失 {missing_img.group(0)}")
+                        # 尝试找到同名图片并复制
+                        img_name = Path(missing_img.group(0)).name
+                        for root, dirs, files in os.walk(Path(current_dir)):
+                            if img_name in files:
+                                source = Path(root) / img_name
+                                target = Path('pics') / img_name
+                                print(f"  找到替代图片: {source}")
+                                if not Path('pics').exists():
+                                    Path('pics').mkdir(parents=True)
+                                shutil.copy(source, target)
+                                print(f"  已复制图片到正确位置: {target}")
+                                break
+        
         # 第二次编译，生成最终PDF
         print("第二次编译...")
-        result = subprocess.run(['xelatex', '-interaction=nonstopmode', tex_filename], 
+        result = subprocess.run(compile_cmd, 
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     timeout=30, check=False)
         
@@ -306,8 +568,9 @@ def compile_latex(tex_file):
             pdf_size = os.path.getsize(pdf_filename)
             print(f"找到PDF文件: {pdf_filename}, 大小: {pdf_size} 字节")
             if pdf_size > 0:
-                print(f"PDF文件已成功生成: {os.path.join(output_dir, pdf_filename)}")
-                return True
+                full_pdf_path = os.path.join(str(output_dir), pdf_filename)
+                print(f"PDF文件已成功生成: {full_pdf_path}")
+                return True, full_pdf_path  # 返回成功状态和完整PDF路径
             else:
                 print("PDF文件大小为0，编译可能出现问题")
         else:
@@ -335,85 +598,450 @@ def compile_latex(tex_file):
                     print("日志中的错误信息:")
                     print('\n'.join(error_lines))
         
-        return os.path.exists(pdf_filename) and os.path.getsize(pdf_filename) > 0
+        pdf_exists = os.path.exists(pdf_filename)
+        pdf_size = os.path.getsize(pdf_filename) if pdf_exists else 0
+        return pdf_exists and pdf_size > 0, str(output_dir / pdf_filename) if pdf_exists else None
     except Exception as e:
         print(f"编译过程中出错: {e}")
-        return False
+        return False, None
     finally:
         os.chdir(current_dir)
+
+def remove_lstlisting_wrappers(content):
+    """
+    删除lstlisting环境的包装，保留内部的图片引用代码
+    """
+    # 查找被lstlisting环境包装的图片引用代码
+    pattern = r'\\begin\{lstlisting\}(\[language=XML\])?\s*(\\begin\{figure\}.*?\\end\{figure\})\s*\\end\{lstlisting\}'
+    
+    # 查找匹配项并替换
+    matches = list(re.finditer(pattern, content, re.DOTALL))
+    if matches:
+        print(f"找到了{len(matches)}处被lstlisting包装的图片引用")
+        for match in matches:
+            # 提取图片引用代码
+            figure_code = match.group(2).strip()
+            # 替换整个匹配为仅保留的图片引用代码
+            content = content.replace(match.group(0), figure_code)
+            print("已移除lstlisting包装，保留图片引用代码")
+    
+    # 查找并移除空的lstlisting环境
+    empty_pattern = r'\\begin\{lstlisting\}(\[language=XML\])?\s*\\end\{lstlisting\}'
+    content = re.sub(empty_pattern, '', content)
+    
+    # 需要单独处理"以下 SVG 图展示..."后面接着的lstlisting环境
+    svg_intro_pattern = r'(以下 SVG 图展示[^\n]*)\s*\\begin\{lstlisting\}(\[language=XML\])?\s*(.*?)\\end\{lstlisting\}'
+    
+    for match in re.finditer(svg_intro_pattern, content, re.DOTALL):
+        intro_text = match.group(1)
+        listing_content = match.group(3).strip()
+        
+        # 检查listing内容是否为空或只有图片引用
+        if not listing_content or listing_content.isspace():
+            # lstlisting为空，检查后面是否有figure环境
+            after_listing = content[match.end():].strip()
+            figure_pattern = r'\\begin\{figure\}.*?\\end\{figure\}'
+            figure_match = re.search(figure_pattern, after_listing, re.DOTALL)
+            
+            if figure_match:
+                # 找到了紧随其后的figure环境，保留intro和figure
+                replacement = f"{intro_text}\n\n{figure_match.group(0)}"
+                # 替换原文本（包括intro、lstlisting和figure）
+                original = content[match.start():match.end() + figure_match.end()]
+                content = content.replace(original, replacement)
+                print("已处理SVG介绍后的lstlisting并保留图片")
+            else:
+                # 没有找到紧随其后的figure，尝试在pics目录查找合适的图片
+                figure_num = 1  # 默认图片编号
+                section_match = re.search(r'\\subsection\{(\d+)', content[:match.start()])
+                if section_match:
+                    try:
+                        section_num = section_match.group(1)
+                        figure_num = int(section_num)
+                    except ValueError:
+                        pass
+                
+                # 创建新的图片引用
+                replacement = f"""{intro_text}
+
+\\begin{{figure}}[htbp]
+\\centering
+\\includegraphics[width=0.8\\textwidth]{{pics/figure_{figure_num}.pdf}}
+\\caption{{研究脉络图}}
+\\label{{fig:figure_{figure_num}}}
+\\end{{figure}}
+"""
+                content = content.replace(match.group(0), replacement)
+                print(f"已替换空lstlisting为默认图片figure_{figure_num}.pdf")
+        elif '\\begin{figure}' in listing_content and '\\end{figure}' in listing_content:
+            # lstlisting中包含图片引用，直接提取
+            figure_pattern = r'\\begin\{figure\}.*?\\end\{figure\}'
+            figure_match = re.search(figure_pattern, listing_content, re.DOTALL)
+            if figure_match:
+                replacement = f"{intro_text}\n\n{figure_match.group(0)}"
+                content = content.replace(match.group(0), replacement)
+                print("已从lstlisting中提取并保留图片引用")
+    
+    return content
 
 def post_process_latex(tex_file, svg_files=None):
     """后处理LaTeX文件，修复一些特定问题，处理SVG引用"""
     try:
+        print(f"\n调试: 对LaTeX文件进行后处理: {tex_file}")
         with open(tex_file, 'r', encoding='utf-8') as f:
             content = f.read()
         
         # 1. 确保文件中包含了正确的字体设置
         if '\\begin{document}' in content and '\\setCJKmainfont' not in content:
             content = content.replace('\\begin{document}', 
-                                     '\\setCJKmainfont{STSong}\n'
-                                     '\\begin{document}')
+                                    '\\setCJKmainfont{STSong}\n'
+                                    '\\begin{document}')
             print("已添加CJK字体设置")
+            
+        # 新增：移除lstlisting环境包装，保留图片引用代码
+        content = remove_lstlisting_wrappers(content)
         
         # 2. 确保包含必要的包定义
         preamble_additions = []
         
+        # 添加对特殊字符的支持（希腊字母、数学符号等）- 使用更简单的方式
+        if "\\usepackage{unicode-math}" in content:
+            # 移除可能导致问题的unicode-math包
+            content = content.replace("\\usepackage{unicode-math}", "")
+            
+            # 添加基本的amsmath和amssymb包用于数学符号支持
+            if "\\usepackage{amsmath}" not in content:
+                preamble_additions.append("\\usepackage{amsmath}")
+            if "\\usepackage{amssymb}" not in content:
+                preamble_additions.append("\\usepackage{amssymb}")
+                
+            # 添加直接的希腊字母命令定义
+            preamble_additions.append("""
+% 定义希腊字母和特殊符号的简单命令
+\\newcommand{\\betasym}{$\\beta$}
+\\newcommand{\\gammasym}{$\\gamma$}
+\\newcommand{\\deltasym}{$\\delta$}
+\\newcommand{\\tausym}{$\\tau$}
+\\newcommand{\\doublearrow}{$\\leftrightarrow$}
+\\newcommand{\\doublelarrow}{$\\Leftrightarrow$}
+""")
+            print("已添加特殊字符支持（简化版本）")
+        
         # 添加所有前言需要的包和命令
         if preamble_additions:
             preamble_text = '\n'.join(preamble_additions) + '\n'
-            content = content.replace('\\begin{document}', 
-                                     preamble_text + '\\begin{document}')
+            # 找一个合适的位置插入这些定义
+            if "\\usepackage{amsmath}" in content:
+                content = content.replace("\\usepackage{amsmath}", "\\usepackage{amsmath}\n" + preamble_text)
+            else:
+                content = content.replace('\\begin{document}', preamble_text + '\\begin{document}')
             print(f"已添加必要的LaTeX包和命令定义")
         
-        # 3. 处理图像引用 - 使用更简单的方法
+        # 3. 替换文本中的特殊字符为TeX命令
+        # 希腊字母替换 - 使用更简单的方式
+        greek_chars = {
+            "β": "\\betasym{}",
+            "γ": "\\gammasym{}",
+            "δ": "\\deltasym{}",
+            "τ": "\\tausym{}",
+            "↔": "\\doublearrow{}",
+            "⟺": "\\doublelarrow{}"
+        }
+        
+        # 在普通文本中替换特殊字符（但避免替换命令定义等区域）
+        for char, command in greek_chars.items():
+            if char in content:
+                # 使用更安全的替换方法
+                parts = content.split(char)
+                new_content = parts[0]
+                for i in range(1, len(parts)):
+                    # 检查前一个字符，避免替换已有的命令
+                    if new_content and new_content[-1] not in '\\{':
+                        new_content += command
+                    else:
+                        new_content += char
+                    new_content += parts[i]
+                content = new_content
+        
+        print("已处理特殊字符")
+        
+        # 4. 处理SVG图像引用
         if svg_files:
             for svg_info in svg_files:
                 image_file = svg_info['path'].split('/')[-1]
                 fig_caption = svg_info['caption'] if svg_info['caption'] else f"图 {svg_info['index']}"
                 
-                # 尝试替换caption标签中的占位符内容
-                placeholder_caption = f"\\caption{{图 {svg_info['index']}: SVG\\_PLACEHOLDER\\_{svg_info['index']-1}}}"
-                real_caption = f"\\caption{{{fig_caption}}}"
+                # 修复图像引用问题 - 查找各种可能的引用模式
+                placeholder_patterns = [
+                    f"图 {svg_info['index']}: SVG_PLACEHOLDER_{svg_info['index']-1}",
+                    f"SVG_PLACEHOLDER_{svg_info['index']-1}",
+                    f"图 {svg_info['index']}:"
+                ]
                 
-                if placeholder_caption in content:
-                    content = content.replace(placeholder_caption, real_caption)
-                    print(f"替换了图像标题: '{placeholder_caption}' -> '{real_caption}'")
+                # 查找图像引用并修复
+                for pattern in placeholder_patterns:
+                    # 检查是否有caption包含这个占位符
+                    caption_pattern = f"\\caption{{{pattern}}}"
+                    if caption_pattern in content:
+                        content = content.replace(caption_pattern, f"\\caption{{{fig_caption}}}")
+                        print(f"替换了图像标题: '{pattern}' -> '{fig_caption}'")
+                        break
                 
-                # 如果没有找到占位符标题，尝试查找和替换整个figure环境
-                if not f"\\caption{{{fig_caption}}}" in content:
-                    # 创建图像引用代码
-                    figure_code = f"""
+                # 查找缺失的图像引用并修复
+                svg_path = svg_info['path']
+                if f"\\includegraphics{{{svg_path}}}" not in content and \
+                   f"\\includegraphics[width=0.8\\textwidth]{{{svg_path}}}" not in content:
+                    
+                    # 检查是否存在不完整的图像引用
+                    image_name = svg_path.split('/')[-1]
+                    if f"\\includegraphics{{{image_name}}}" in content:
+                        # 修复相对路径问题
+                        content = content.replace(
+                            f"\\includegraphics{{{image_name}}}", 
+                            f"\\includegraphics[width=0.8\\textwidth]{{{svg_path}}}"
+                        )
+                        print(f"修复了图像路径: '{image_name}' -> '{svg_path}'")
+                    elif "SVG_PLACEHOLDER" in content:
+                        # 查找包含占位符的段落，并添加正确的图像引用
+                        for placeholder in placeholder_patterns:
+                            if placeholder in content:
+                                paragraph_with_placeholder = re.search(
+                                    f"[^\n]*{re.escape(placeholder)}[^\n]*", 
+                                    content
+                                )
+                                if paragraph_with_placeholder:
+                                    # 创建图像代码
+                                    figure_code = f"""
 \\begin{{figure}}[htbp]
 \\centering
-\\includegraphics[width=0.8\\textwidth]{{{svg_info['path']}}}
+\\includegraphics[width=0.8\\textwidth]{{{svg_path}}}
 \\caption{{{fig_caption}}}
 \\label{{fig:svg_{svg_info['index']}}}
 \\end{{figure}}
 """
-                    
-                    # 尝试各种可能的图像引用模式进行替换
-                    patterns_to_check = [
-                        f"\\includegraphics{{{svg_info['path']}}}",
-                        f"\\includegraphics[width=0.8\\textwidth]{{{svg_info['path']}}}",
-                        f"\\includesvg[keepaspectratio]{{{svg_info['path']}}}",
-                        f"\\pandocbounded{{\\includesvg[keepaspectratio]{{{svg_info['path']}}}}}",
-                    ]
-                    
-                    replaced = False
-                    for pattern in patterns_to_check:
-                        if pattern in content:
-                            print(f"找到图像引用: {pattern.split('{')[0]}...")
-                            if "\\begin{figure}" not in content.split(pattern)[0][-200:]:
-                                content = content.replace(pattern, figure_code)
-                                replaced = True
-                                break
+                                    # 替换包含占位符的段落
+                                    content = content.replace(
+                                        paragraph_with_placeholder.group(0),
+                                        figure_code
+                                    )
+                                    print(f"添加了图像引用: 图 {svg_info['index']}")
+                                    break
         
-        # 4. 修复其他图片的处理
-        if '\\includegraphics{' in content:
-            content = content.replace('\\includegraphics{', '\\includegraphics[width=0.8\\textwidth]{')
-            print("已调整其他图像的宽度")
+        # 5. 强化图片处理 - 确保在LaTeX中正确加载图片
+        img_packages = [
+            "\\usepackage{graphicx}",  # 基本图形包
+            "\\usepackage{float}"      # 用于控制图片位置
+        ]
         
-        # 5. 写回文件
+        # 确保需要的包都被加载
+        for pkg in img_packages:
+            if pkg not in content:
+                content = content.replace('\\documentclass', f'{pkg}\n\\documentclass')
+        
+        # 确保图片路径正确 - 移除路径中的多余空格
+        img_pattern = r'\\includegraphics(\[.*?\])?\{\s*(.*?)\s*\}'
+        for match in re.finditer(img_pattern, content):
+            old_tag = match.group(0)
+            options = match.group(1) or ''
+            path = match.group(2).strip()  # 移除路径两端的空格
+            
+            # 构建新的图片标签，确保格式正确
+            new_tag = f'\\includegraphics{options}{{{path}}}'
+            if old_tag != new_tag:
+                content = content.replace(old_tag, new_tag)
+                print(f"修复图片路径格式: {old_tag} -> {new_tag}")
+        
+        # 6. 修复图像路径问题（特别是未指定pics/目录的图片）
+        img_pattern = r'\\includegraphics(\[.*?\])?{((?!pics/).+?\.(?:pdf|png|jpg|jpeg))}'
+        for match in re.finditer(img_pattern, content):
+            options = match.group(1) or ''
+            img_path = match.group(2)
+            if not img_path.startswith('pics/') and not img_path.startswith('/'):
+                fixed_path = f"pics/{img_path}"
+                content = content.replace(
+                    f"\\includegraphics{options}{{{img_path}}}", 
+                    f"\\includegraphics[width=0.8\\textwidth]{{{fixed_path}}}"
+                )
+                print(f"修复了图像路径: '{img_path}' -> '{fixed_path}'")
+                
+                # 检查图片文件是否存在，不存在则尝试查找并复制
+                output_dir = Path(tex_file).parent
+                target_path = output_dir / fixed_path
+                if not target_path.exists():
+                    img_name = Path(img_path).name
+                    found = False
+                    
+                    # 递归查找图片
+                    for root, dirs, files in os.walk('.'):
+                        if img_name in files:
+                            source_path = Path(root) / img_name
+                            os.makedirs(target_path.parent, exist_ok=True)
+                            print(f"找到并复制图片: {source_path} -> {target_path}")
+                            shutil.copy(source_path, target_path)
+                            found = True
+                            break
+                    
+                    if not found:
+                        print(f"警告: 无法找到图片文件 {img_name} 以复制到 {target_path}")
+        
+        # 7. 确保所有图片引用都被包装在figure环境中
+        img_refs = re.findall(r'\\includegraphics(?:\[.*?\])?\{(pics/[^}]+)\}', content)
+        for img_ref in img_refs:
+            # 检查这个引用是否已经在figure环境中
+            img_pattern = f'\\\\includegraphics(?:\\[.*?\\])?\\{{{re.escape(img_ref)}\\}}'
+            
+            # 查找匹配的includegraphics标签
+            match = re.search(img_pattern, content)
+            if match:
+                # 检查前后文是否已有figure环境
+                before_ctx = content[:match.start()].rfind('\\begin{figure')
+                after_ctx = content[match.end():].find('\\end{figure}')
+                
+                # 如果没有在figure环境中
+                if before_ctx == -1 or content[before_ctx:match.start()].find('\\end{figure}') != -1 or after_ctx == -1:
+                    # 提取文件名和编号
+                    file_name = Path(img_ref).name
+                    fig_num = "1"
+                    if "figure_" in file_name:
+                        fig_num_match = re.search(r'figure_(\d+)', file_name)
+                        if fig_num_match:
+                            fig_num = fig_num_match.group(1)
+                    
+                    # 创建完整的figure环境
+                    img_tag = match.group(0)
+                    figure_env = f"""
+\\begin{{figure}}[H]  % H强制图片在当前位置
+\\centering
+{img_tag}
+\\caption{{图 {fig_num}}}
+\\label{{fig:figure_{fig_num}}}
+\\end{{figure}}
+"""
+                    # 替换原始图片标签
+                    content = content.replace(img_tag, figure_env)
+                    print(f"为图片添加figure环境: {img_ref}")
+        
+        # 8. 处理特殊的图片引用格式
+        # 8.1 处理 !(图 6: 普适性标度律示意图)(pics/figure_6.pdf) 格式
+        special_img_pattern = r'!\((图\s+\d+:.+?)\)\((pics/figure_\d+\.pdf)\)'
+        for match in re.finditer(special_img_pattern, content):
+            caption = match.group(1)
+            img_path = match.group(2)
+            
+            # 获取图片编号
+            fig_num = re.search(r'图\s+(\d+)', caption).group(1)
+            
+            # 创建正确的figure环境
+            figure_code = f"""
+\\begin{{figure}}[htbp]
+\\centering
+\\includegraphics[width=0.8\\textwidth]{{{img_path}}}
+\\caption{{{caption}}}
+\\label{{fig:figure_{fig_num}}}
+\\end{{figure}}
+"""
+            # 替换原始的引用
+            content = content.replace(match.group(0), figure_code)
+            print(f"修复了特殊图片引用: {caption}")
+        
+        # 8.2 修复已有的未正确处理的图片引用
+        # 查找类似 ! [ 图 6: 普适性标度律示意图 ] ( pics/figure_6.pdf ) 的模式
+        existing_img_pattern = r'!\s*\[\s*(图\s+\d+:.*?)\s*\]\s*\(\s*(pics/figure_\d+\.pdf)\s*\)'
+        for match in re.finditer(existing_img_pattern, content):
+            caption = match.group(1)
+            img_path = match.group(2)
+            
+            # 获取图片编号
+            fig_num_match = re.search(r'图\s+(\d+)', caption)
+            if fig_num_match:
+                fig_num = fig_num_match.group(1)
+                
+                # 检查是否已经在figure环境中
+                if "\\begin{figure}" not in content.split(match.group(0))[0][-200:]:
+                    # 创建figure环境
+                    figure_code = f"""
+\\begin{{figure}}[htbp]
+\\centering
+\\includegraphics[width=0.8\\textwidth]{{{img_path}}}
+\\caption{{{caption}}}
+\\label{{fig:figure_{fig_num}}}
+\\end{{figure}}
+"""
+                    # 替换原始引用
+                    content = content.replace(match.group(0), figure_code)
+                    print(f"修复了标准图片引用: {caption}")
+        
+        # 9. 处理可能在文本中直接出现的LaTeX图片代码 (防止被当作文本显示)
+        # 9.1 处理转义的LaTeX代码
+        text_latex_pattern = r'\\\\begin\{figure\}.*?\\\\end\{figure\}'
+        for match in re.finditer(text_latex_pattern, content, re.DOTALL):
+            escaped_code = match.group(0)
+            # 将双反斜杠替换为单反斜杠
+            fixed_code = escaped_code.replace('\\\\', '\\')
+            content = content.replace(escaped_code, fixed_code)
+            print(f"修复了转义的LaTeX代码")
+        
+        # 9.2 处理图形环境中的空行，确保LaTeX正确处理
+        figure_blocks = re.findall(r'\\begin{figure}.*?\\end{figure}', content, re.DOTALL)
+        for block in figure_blocks:
+            # 删除多余的空行，但保留基本结构
+            fixed_block = re.sub(r'\n\s*\n', '\n', block)
+            if block != fixed_block:
+                content = content.replace(block, fixed_block)
+                print("修复了figure环境中的空行")
+        
+        # 10. 在preamble中添加额外的图片支持
+        if '\\begin{document}' in content:
+            preamble_additions = """
+% 增强图片处理支持
+\\usepackage{graphicx}
+\\usepackage{float}
+\\DeclareGraphicsExtensions{.pdf,.png,.jpg}
+\\graphicspath{{./pics/}}  % 指定图片搜索路径
+
+% 定义图片样式
+\\renewcommand{\\figurename}{图}
+"""
+            # 检查是否已经有这些设置
+            if '\\graphicspath' not in content:
+                # 在文档开始前添加这些设置
+                content = content.replace('\\begin{document}', preamble_additions + '\\begin{document}')
+                print("添加了图片处理增强设置")
+        
+        # 11. 确保图片文件存在
+        tex_dir = Path(tex_file).parent
+        pics_dir = tex_dir / 'pics'
+        if not pics_dir.exists():
+            pics_dir.mkdir(parents=True)
+            print(f"创建图片目录: {pics_dir}")
+        
+        for img_ref in img_refs:
+            img_path = tex_dir / img_ref
+            if not img_path.exists():
+                print(f"警告: 图片文件不存在 {img_path}")
+                # 搜索整个项目查找同名图片
+                img_name = img_path.name
+                for root, dirs, files in os.walk('.'):
+                    for file in files:
+                        if file == img_name:
+                            source = Path(root) / file
+                            print(f"找到替代图片: {source}")
+                            # 确保目标目录存在
+                            img_path.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy(source, img_path)
+                            print(f"已复制图片: {source} -> {img_path}")
+                            break
+                    if img_path.exists():
+                        break
+        
+        # 添加调试输出 - 列出所有图片引用和状态
+        print(f"\n调试: LaTeX内容中的图片引用:")
+        for img_ref in img_refs:
+            img_path = tex_dir / img_ref
+            print(f"  图片引用: {img_ref}")
+            print(f"  文件存在: {img_path.exists()}, 大小: {img_path.stat().st_size if img_path.exists() else 0} 字节")
+        
+        # 写回文件
         with open(tex_file, 'w', encoding='utf-8') as f:
             f.write(content)
         
@@ -426,27 +1054,69 @@ def post_process_latex(tex_file, svg_files=None):
         return False
 
 def main():
-    parser = argparse.ArgumentParser(description='将Markdown文件转换为LaTeX并编译成PDF')
+    parser = argparse.ArgumentParser(
+        description='将Markdown文件转换为LaTeX并编译成PDF - 支持中文、数学公式和图片',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使用示例:
+  简单转换:
+    python md2latex_pandoc.py ./example.md
+  
+  自动打开PDF:
+    python md2latex_pandoc.py ./example.md --open
+    
+  指定输出目录:
+    python md2latex_pandoc.py ./example.md -o ./output_dir
+    
+  使用自定义模板:
+    python md2latex_pandoc.py ./example.md -t ./my_template.tex
+"""
+    )
     parser.add_argument('markdown_file', help='输入的Markdown文件路径')
-    parser.add_argument('-o', '--output-dir', help='输出目录路径', default=None)
-    parser.add_argument('-t', '--template', help='LaTeX模板文件路径', 
+    parser.add_argument('-o', '--output-dir', help='输出目录路径 (默认为Markdown文件所在目录)', default=None)
+    parser.add_argument('-t', '--template', help='LaTeX模板文件路径 (默认使用内置模板)', 
                         default=str(Path('latex_style/template.tex')))
+    parser.add_argument('--open', action='store_true', help='编译完成后自动打开PDF文件')
+    parser.add_argument('--fix-images', action='store_true', help='使用更强的图片修复模式，尝试解决图片不显示问题')
     
     args = parser.parse_args()
+    
+    print(f"处理Markdown文件: {args.markdown_file}")
+    if args.output_dir:
+        print(f"输出目录: {args.output_dir}")
+    if args.open:
+        print("编译完成后将自动打开PDF文件")
     
     # 转换Markdown为LaTeX
     tex_file = convert_md_to_latex(args.markdown_file, args.output_dir, args.template)
     if not tex_file:
+        print("转换失败，请检查错误信息")
         sys.exit(1)
     
     # 后处理LaTeX文件
     post_process_latex(tex_file)
     
     # 编译LaTeX生成PDF
-    if not compile_latex(tex_file):
+    success, pdf_path = compile_latex(tex_file, args.fix_images)
+    if not success:
+        print("编译失败，请检查LaTeX错误")
         sys.exit(1)
     
     print("转换和编译完成。")
+    
+    # 如果指定了--open选项，则自动打开PDF
+    if args.open and pdf_path and os.path.exists(pdf_path):
+        try:
+            print(f"正在打开PDF文件: {pdf_path}")
+            if sys.platform == 'darwin':  # macOS
+                subprocess.run(['open', pdf_path], check=True)
+            elif sys.platform == 'win32':  # Windows
+                os.startfile(pdf_path)
+            else:  # Linux or other Unix
+                subprocess.run(['xdg-open', pdf_path], check=True)
+        except Exception as e:
+            print(f"尝试打开PDF时出错: {e}")
+            print("请手动打开PDF文件: " + pdf_path)
 
 if __name__ == '__main__':
     main() 

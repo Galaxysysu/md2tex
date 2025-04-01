@@ -9,9 +9,11 @@ NC='\033[0m' # 无颜色
 
 # 打印帮助信息的函数
 print_help() {
-    echo -e "${BLUE}用法: $0 <tex_file_path>${NC}"
-    echo -e "  该脚本用于编译LaTeX文件生成PDF"
+    echo -e "${BLUE}用法: $0 <file_path>${NC}"
+    echo -e "  该脚本用于将Markdown或LaTeX文件转换为PDF"
+    echo -e "  支持的文件类型: .md, .tex"
     echo -e "  例如: $0 gemini_paper/绪论/绪论.tex"
+    echo -e "        $0 gemini_paper/绪论.md"
     echo
     echo -e "${YELLOW}选项:${NC}"
     echo -e "  -h, --help     显示帮助信息"
@@ -19,8 +21,92 @@ print_help() {
     echo -e "  -o, --open     编译成功后打开PDF文件"
 }
 
+# 编译LaTeX文件的函数
+compile_tex() {
+    local tex_file="$1"
+    local tex_dir=$(dirname "$tex_file")
+    local tex_filename=$(basename "$tex_file")
+    local tex_name="${tex_filename%.tex}"
+    
+    # 切换到LaTeX文件所在目录
+    cd "$tex_dir" || { echo -e "${RED}错误: 无法切换到目录 '$tex_dir'${NC}"; return 1; }
+    
+    echo -e "${BLUE}[$(date +%H:%M:%S)] 开始第一次编译...${NC}"
+    xelatex -interaction=nonstopmode "$tex_filename"
+    local compile_status=$?
+    
+    if [ $compile_status -ne 0 ]; then
+        echo -e "${YELLOW}第一次编译返回状态: $compile_status (可能有警告)${NC}"
+    else
+        echo -e "${GREEN}第一次编译成功${NC}"
+    fi
+    
+    echo -e "${BLUE}[$(date +%H:%M:%S)] 开始第二次编译...${NC}"
+    xelatex -interaction=nonstopmode "$tex_filename"
+    compile_status=$?
+    
+    if [ $compile_status -ne 0 ]; then
+        echo -e "${YELLOW}第二次编译返回状态: $compile_status (可能有警告)${NC}"
+    else
+        echo -e "${GREEN}第二次编译成功${NC}"
+    fi
+    
+    # 检查PDF是否生成
+    if [ -f "${tex_name}.pdf" ]; then
+        local pdf_size=$(du -h "${tex_name}.pdf" | cut -f1)
+        echo -e "${GREEN}成功生成PDF文件: ${YELLOW}${tex_dir}/${tex_name}.pdf ${GREEN}(大小: $pdf_size)${NC}"
+        return 0
+    else
+        echo -e "${RED}错误: 无法找到生成的PDF文件${NC}"
+        if [ -f "${tex_name}.log" ]; then
+            echo -e "${YELLOW}检查日志文件中的错误:${NC}"
+            grep -n "!" "${tex_name}.log" | head -10
+        fi
+        return 1
+    fi
+}
+
+# 处理Markdown文件的函数
+process_markdown() {
+    local md_file="$1"
+    local md_dir=$(dirname "$md_file")
+    local md_filename=$(basename "$md_file")
+    local md_name="${md_filename%.md}"
+    # 修改tex文件路径，考虑到md2latex_pandoc.py会创建同名文件夹
+    local tex_file="${md_dir}/${md_name}/${md_name}.tex"
+    
+    echo -e "${BLUE}转换Markdown到LaTeX: ${YELLOW}$md_file${NC}"
+    
+    # 调用Python脚本转换Markdown到LaTeX
+    python md2latex_pandoc.py "$md_file"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}错误: Markdown转换失败${NC}"
+        return 1
+    fi
+    
+    # 检查生成的tex文件
+    if [ ! -f "$tex_file" ]; then
+        echo -e "${RED}错误: 未找到生成的LaTeX文件: $tex_file${NC}"
+        return 1
+    fi
+    
+    # 编译生成的tex文件
+    compile_tex "$tex_file"
+    return $?
+}
+
+# 清理临时文件的函数
+clean_temp_files() {
+    local base_name="$1"
+    echo -e "${BLUE}清理临时文件...${NC}"
+    rm -f "${base_name}.aux" "${base_name}.log" "${base_name}.out" "${base_name}.toc" \
+          "${base_name}.lof" "${base_name}.lot" "${base_name}.bbl" "${base_name}.blg" \
+          "${base_name}.nav" "${base_name}.snm" "${base_name}.synctex.gz"
+    echo -e "${GREEN}清理完成${NC}"
+}
+
 # 参数解析
-TEX_FILE=""
+INPUT_FILE=""
 CLEAN_TEMP=false
 OPEN_PDF=false
 
@@ -36,112 +122,67 @@ for arg in "$@"; do
         -o|--open)
             OPEN_PDF=true
             ;;
-        *.tex)
-            TEX_FILE="$arg"
+        *.tex|*.md)
+            INPUT_FILE="$arg"
             ;;
     esac
 done
 
-# 检查是否提供了tex文件
-if [ -z "$TEX_FILE" ]; then
-    echo -e "${RED}错误: 必须提供LaTeX文件路径${NC}"
+# 检查是否提供了输入文件
+if [ -z "$INPUT_FILE" ]; then
+    echo -e "${RED}错误: 必须提供输入文件路径 (.md 或 .tex)${NC}"
     print_help
     exit 1
 fi
 
 # 检查文件是否存在
-if [ ! -f "$TEX_FILE" ]; then
-    echo -e "${RED}错误: 文件 '$TEX_FILE' 不存在${NC}"
+if [ ! -f "$INPUT_FILE" ]; then
+    echo -e "${RED}错误: 文件 '$INPUT_FILE' 不存在${NC}"
     exit 1
 fi
 
-# 提取目录和文件名
-TEX_DIR=$(dirname "$TEX_FILE")
-TEX_FILENAME=$(basename "$TEX_FILE")
-TEX_NAME="${TEX_FILENAME%.tex}"
-PDF_FILE="$TEX_DIR/$TEX_NAME.pdf"
-
-echo -e "${BLUE}编译文件: ${YELLOW}$TEX_FILE${NC}"
-echo -e "${BLUE}输出目录: ${YELLOW}$TEX_DIR${NC}"
-
-# 切换到LaTeX文件所在目录
+# 保存当前目录
 CURRENT_DIR=$(pwd)
-cd "$TEX_DIR" || { echo -e "${RED}错误: 无法切换到目录 '$TEX_DIR'${NC}"; exit 1; }
 
-# 记录编译前的文件，用于比较
-FILES_BEFORE=$(ls -l)
+# 根据文件类型进行处理
+case "$INPUT_FILE" in
+    *.tex)
+        compile_tex "$INPUT_FILE"
+        COMPILE_STATUS=$?
+        ;;
+    *.md)
+        process_markdown "$INPUT_FILE"
+        COMPILE_STATUS=$?
+        ;;
+    *)
+        echo -e "${RED}错误: 不支持的文件类型${NC}"
+        exit 1
+        ;;
+esac
 
-# 显示时间戳
-echo -e "${BLUE}[$(date +%H:%M:%S)] 开始第一次编译...${NC}"
-
-# 第一次编译
-xelatex -interaction=nonstopmode "$TEX_FILENAME"
-COMPILE_STATUS=$?
-
-if [ $COMPILE_STATUS -ne 0 ]; then
-    echo -e "${YELLOW}第一次编译返回状态: $COMPILE_STATUS (可能有警告)${NC}"
-else
-    echo -e "${GREEN}第一次编译成功${NC}"
+# 如果编译成功且需要清理临时文件
+if [ $COMPILE_STATUS -eq 0 ] && [ "$CLEAN_TEMP" = true ]; then
+    clean_temp_files "${INPUT_FILE%.*}"
 fi
 
-# 显示时间戳
-echo -e "${BLUE}[$(date +%H:%M:%S)] 开始第二次编译...${NC}"
-
-# 第二次编译
-xelatex -interaction=nonstopmode "$TEX_FILENAME"
-COMPILE_STATUS=$?
-
-if [ $COMPILE_STATUS -ne 0 ]; then
-    echo -e "${YELLOW}第二次编译返回状态: $COMPILE_STATUS (可能有警告)${NC}"
-else
-    echo -e "${GREEN}第二次编译成功${NC}"
-fi
-
-# 检查PDF是否生成
-if [ -f "${TEX_NAME}.pdf" ]; then
-    PDF_SIZE=$(du -h "${TEX_NAME}.pdf" | cut -f1)
-    echo -e "${GREEN}成功生成PDF文件: ${YELLOW}$PDF_FILE ${GREEN}(大小: $PDF_SIZE)${NC}"
-    
-    # 打开PDF文件（如果指定了-o选项）
-    if [ "$OPEN_PDF" = true ]; then
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            # macOS
-            open "${TEX_NAME}.pdf"
-        elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-            # Linux
-            if command -v xdg-open &> /dev/null; then
-                xdg-open "${TEX_NAME}.pdf"
-            else
-                echo -e "${YELLOW}无法自动打开PDF文件: 未找到xdg-open命令${NC}"
-            fi
+# 如果编译成功且需要打开PDF
+if [ $COMPILE_STATUS -eq 0 ] && [ "$OPEN_PDF" = true ]; then
+    PDF_FILE="${INPUT_FILE%.*}.pdf"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        open "$PDF_FILE"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if command -v xdg-open &> /dev/null; then
+            xdg-open "$PDF_FILE"
         else
-            echo -e "${YELLOW}不支持自动打开PDF文件: 未知操作系统${NC}"
+            echo -e "${YELLOW}无法自动打开PDF文件: 未找到xdg-open命令${NC}"
         fi
+    else
+        echo -e "${YELLOW}不支持自动打开PDF文件: 未知操作系统${NC}"
     fi
-else
-    echo -e "${RED}错误: 无法找到生成的PDF文件${NC}"
-    
-    # 检查日志文件中的错误
-    if [ -f "${TEX_NAME}.log" ]; then
-        echo -e "${YELLOW}检查日志文件中的错误:${NC}"
-        grep -n "!" "${TEX_NAME}.log" | head -10
-    fi
-    
-    cd "$CURRENT_DIR"
-    exit 1
-fi
-
-# 清理临时文件（如果指定了-c选项）
-if [ "$CLEAN_TEMP" = true ]; then
-    echo -e "${BLUE}清理临时文件...${NC}"
-    rm -f "${TEX_NAME}.aux" "${TEX_NAME}.log" "${TEX_NAME}.out" "${TEX_NAME}.toc" \
-          "${TEX_NAME}.lof" "${TEX_NAME}.lot" "${TEX_NAME}.bbl" "${TEX_NAME}.blg" \
-          "${TEX_NAME}.nav" "${TEX_NAME}.snm" "${TEX_NAME}.synctex.gz"
-    echo -e "${GREEN}清理完成${NC}"
 fi
 
 # 返回原目录
 cd "$CURRENT_DIR"
 
-echo -e "${GREEN}编译过程完成${NC}"
-exit 0
+# 根据编译状态设置退出码
+exit $COMPILE_STATUS
